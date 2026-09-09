@@ -1,0 +1,40 @@
+# OS and editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Logs, temporary files, and caches
+*.log
+*.tmp
+*.temp
+*.bak
+.cache/
+cache/
+tmp/
+temp/
+
+# Runtime state and ChatGPT conversation bindings
+chatgpt_session.json
+*.state.json
+sessions/
+state/
+runtime/
+
+# Chrome profiles and browser data
+.chrome-profile/
+chrome-profile/
+user-data-dir/
+
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+mcp_config.json
