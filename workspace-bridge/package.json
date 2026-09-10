@@ -1,0 +1,20 @@
+{
+  "name": "antigravity-workspace-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only workspace MCP bridge for antigravity-with-chatgpt",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.2",
+    "express": "^5.1.0",
+    "ignore": "^7.0.5",
+    "zod": "^3.25.0"
+  }
+}

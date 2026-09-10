@@ -17,6 +17,9 @@ Desktop.ini
 cache/
 tmp/
 temp/
+workspace-bridge/node_modules/
+workspace-bridge/coverage/
+workspace-bridge/.npm-cache/
 
 # Runtime state and ChatGPT conversation bindings
 chatgpt_session.json
