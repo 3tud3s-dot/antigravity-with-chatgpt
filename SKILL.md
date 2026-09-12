@@ -45,15 +45,18 @@ Antigravity 综合思考 / 执行工具 / 回复用户
     "antigravityConversationId": "<current-conversation-id>",
     "workspaceId": "<canonical-workspace-id>",
     "connectorName": "Antigravity with ChatGPT · <workspace-name>",
+    "chatgptProjectName": "Antigravity with ChatGPT · <workspace-name> · <workspace-id>",
+    "chatgptProjectUrl": "<saved ChatGPT Project URL>",
     "chatgptPageId": 12345,
-    "chatgptUrl": "https://chatgpt.com/c/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "chatgptUrl": "<saved ChatGPT Project conversation URL>",
     "updatedAt": "2026-09-10T00:00:00Z"
   }
   ```
 - **隔离原则**：
   - 不同的 Antigravity conversation 必须创建并绑定不同的 ChatGPT conversation。
   - 同一个 workspace 只使用一个 `Antigravity with ChatGPT · <workspace-name>` Connector；该 workspace 下的多个 ChatGPT conversation 共享它。
-  - Connector 的 workspace 状态由 `workspace-bridge` 存放在 OS 用户状态目录，不写入 workspace 或 Git。
+  - 同一个 canonical workspace 只使用一个带稳定 `workspaceId` 后缀的 ChatGPT Project，并启用 Project-only memory；该 workspace 的所有 Advisor conversation 必须创建在该 Project 内。
+  - Connector 与 Project 的 workspace 状态由 `workspace-bridge` 存放在 OS 用户状态目录，不写入 workspace 或 Git。
   - 严禁多个 Antigravity 会话共享同一个 ChatGPT 网页会话。
 
 ---
@@ -68,11 +71,11 @@ Antigravity 综合思考 / 执行工具 / 回复用户
 3. 根据 CLI 返回的 `connector.action` 创建、替换或复用 workspace 级 Connector。
 4. Connector 必须使用 OAuth，且只能暴露六个只读工具。Connector 未安装或身份未验证前，不得宣称 Advisor 模式已就绪。
 
-### 步骤 2.1：新建独立 Chrome 页面
-1. 调用 `chrome-devtools` MCP 工具：
-   `call_mcp_tool(ServerName="chrome-devtools", ToolName="new_page", Arguments={"url": "https://chatgpt.com/"})`
-2. **强制规则**：必须通过 `new_page` 新建页面，绝对不可复用或读取用户此前已经打开的其他标签页。
-3. 记录返回的 `pageId`。
+### 步骤 2.1：创建或恢复 workspace ChatGPT Project
+1. 读取并严格执行 [chatgpt-project.md](./references/chatgpt-project.md)。
+2. 根据 setup 返回的 `project.action` 创建或恢复精确 `projectName`，并确保启用 Project-only memory、保存项目级 Advisor Instructions。
+3. 从已验证的 Project 页面内部新建本 Antigravity conversation 专属的 ChatGPT conversation；不可从普通聊天首页创建。
+4. 记录该专属页面的 `pageId`。
 
 ### 步骤 2.2：检查加载与登录状态
 1. 调用 `take_snapshot(pageId)` 获取最新 a11y 树。
@@ -84,26 +87,20 @@ Antigravity 综合思考 / 执行工具 / 回复用户
    - 明确提示用户：“请在打开的 Chrome 窗口中手动登录 ChatGPT 账号。登录完成后请回复我继续。”
    - **严禁**尝试代填密码、读取凭据、Cookie 或 Token。
 
-### 步骤 2.3：自动发送内嵌初始化 Prompt
-在新建的空白 ChatGPT 会话中，由 Skill 自动输入并发送以下固定初始化 Prompt（**仅在初始化时发送一次，后续轮次绝不重复**）：
-
-> 你是 Antigravity 的外部顾问。接下来会收到用户发送给 Antigravity 的任务。请给出简洁的分析、建议和可执行步骤，并指出重要风险或遗漏。Antigravity 会读取你的回复并负责最终判断和执行。
-
-- **操作细节**：
-  1. 根据 `take_snapshot` 定位输入框的最新 `uid`。
-  2. 调用 `type_text(pageId=..., text=..., submitKey="Enter")` 或在输入后调用 `click` 点击发送按钮。
-  3. 等待 ChatGPT 回复流式结束（参见 [browser-protocol.md](./references/browser-protocol.md)）。
+### 步骤 2.3：确认 Project 上下文
+1. 首条消息发送前获取新快照，确认当前页面仍显示精确 `chatgptProjectName`。
+2. Advisor 角色由 Project Instructions 提供，不再向聊天发送初始化 Prompt。
+3. 若页面脱离预期 Project，停止发送并按 [chatgpt-project.md](./references/chatgpt-project.md) 恢复一次。
 
 ### 步骤 2.4：获取并持久化绑定会话 URL
-1. 初始化 Prompt 发送并回复完成后，页面 URL 会自动更新为形如：
-   `https://chatgpt.com/c/<unique-uuid>`
+1. 首条 workspace 验证 Prompt 发送并回复完成后，获取该项目内 conversation 的完整 URL；不要假定固定 URL 结构。
 2. 调用 `list_pages` 或执行快照核验，提取该 `pageId` 当前对应的完整会话 URL。
 3. 暂存该 URL，但在 Workspace Connector 身份验证成功前不要写入 `enabled: true`。
 
 ### 步骤 2.5：验证本地 workspace 并完成绑定
-1. 初始化回复完成后，发送 [workspace-connector.md](./references/workspace-connector.md) 中独立的 `workspace_info` 验证 Prompt。
+1. 项目内 conversation 创建后，发送 [workspace-connector.md](./references/workspace-connector.md) 中独立的 `workspace_info` 验证 Prompt。
 2. 必须同时核对 CLI 返回的 `workspaceId`、`workspaceName`，并确认 Connector 成功读取了一个小型非敏感文本文件。
-3. 验证成功后调用 `mark-connector-installed`，再将 `enabled: true`、`workspaceId`、`connectorName`、`chatgptPageId` 与 `chatgptUrl` 写入本 conversation 的状态文件。
+3. 验证成功后调用 `mark-connector-installed`，再将 `enabled: true`、`workspaceId`、`connectorName`、`chatgptProjectName`、`chatgptProjectUrl`、`chatgptPageId` 与 `chatgptUrl` 写入本 conversation 的状态文件。
 4. 向用户确认：“ChatGPT Web Advisor 模式已就绪，并已绑定专属顾问会话和当前 workspace 的只读 Connector。”（若用户该轮已有具体任务，则顺带进入下一阶段处理）。
 
 ---
@@ -174,3 +171,6 @@ Antigravity 综合思考 / 执行工具 / 回复用户
 
 有关只读 Workspace Bridge、OAuth/pairing、Connector 创建与 workspace 级复用，请查阅：
 [workspace-connector.md](./references/workspace-connector.md)
+
+有关 workspace 级 ChatGPT Project、Project-only memory、项目指令与项目内会话创建，请查阅：
+[chatgpt-project.md](./references/chatgpt-project.md)

@@ -32,10 +32,15 @@ Let `<skill-root>` be the directory containing `SKILL.md`, and let `<workspace-r
      "workspaceName": "<name>",
      "connectorName": "Antigravity with ChatGPT · <workspace-name>",
      "mcpUrl": "https://<quick-tunnel-host>/mcp",
-     "connector": {
-       "reusable": false,
-       "action": "create"
-     },
+    "connector": {
+      "reusable": false,
+      "action": "create"
+    },
+    "projectName": "Antigravity with ChatGPT · <workspace-name> · <workspace-id>",
+    "project": {
+      "reusable": false,
+      "action": "create"
+    },
      "code": "XXXX-XXXX",
      "expiresAt": 0
    }
@@ -77,13 +82,10 @@ If the code expires before submission, rerun setup with `--force-connector` to o
 
 ## 4. Create and verify the Advisor conversation
 
-Whether the Connector was created or reused, create a new dedicated ChatGPT page for this Antigravity conversation. Do not reuse a ChatGPT conversation belonging to another Antigravity conversation.
+Whether the Connector was created or reused, first follow [chatgpt-project.md](./chatgpt-project.md) to create or recover the workspace Project and start a new dedicated conversation inside it. Do not create a normal ChatGPT chat and do not reuse a conversation belonging to another Antigravity conversation.
 
-1. Send the existing Advisor initialization Prompt exactly once:
-
-   > 你是 Antigravity 的外部顾问。接下来会收到用户发送给 Antigravity 的任务。请给出简洁的分析、建议和可执行步骤，并指出重要风险或遗漏。Antigravity 会读取你的回复并负责最终判断和执行。
-
-2. After that reply completes, send this separate verification Prompt with the returned values substituted:
+1. The Advisor role comes from Project Instructions. Do not send a separate initialization chat message.
+2. Send this verification Prompt as the first message, with the returned values substituted:
 
    ```text
    Use the "<connectorName>" connector now. Call workspace_info. Confirm that workspaceId is "<workspaceId>" and workspaceName is "<workspaceName>". Then read one small non-sensitive top-level text file and report its workspace-relative path. Do not use any other connector.
@@ -106,7 +108,7 @@ On every later enable in the same workspace, run `setup` again:
 
 - A live bridge plus a locally confirmed Connector at the same MCP URL returns `reuse`.
 - A dead bridge starts a new Quick Tunnel; its URL differs, so setup returns `replace` rather than creating a second Connector.
-- A new Antigravity conversation always creates a new ChatGPT conversation, even when the workspace Connector is reused.
+- A new Antigravity conversation always creates a new ChatGPT conversation inside the saved workspace Project, even when the Project and Connector are reused.
 - The first `workspace_info` verification in every new ChatGPT conversation guards against workspace or Connector cross-wiring.
 
 The browser-visible Connector is never the authority by name alone. The canonical workspace ID and the live MCP URL are the binding authority.

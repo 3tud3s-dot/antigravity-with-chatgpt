@@ -2,7 +2,17 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Workspace } from "./workspace/workspace.js";
 import { startBridge } from "./bridge/server.js";
-import { connectorDecision, connectorNameFor, markConnectorInstalled, readConnector, readRuntime } from "./bridge/state.js";
+import {
+  connectorDecision,
+  connectorNameFor,
+  markConnectorInstalled,
+  markProjectCreated,
+  projectDecision,
+  projectNameFor,
+  readConnector,
+  readProject,
+  readRuntime
+} from "./bridge/state.js";
 import { tunnelIsHealthy, tunnelIsReadyForSetup } from "./tunnel/health.js";
 
 function argument(name) {
@@ -68,14 +78,18 @@ async function setup(workspaceRoot) {
     throw new Error("Quick Tunnel is not reachable from the public HTTPS endpoint");
   }
   const connector = readConnector(workspace.id);
+  const project = readProject(workspace.id);
   const forced = process.argv.includes("--force-connector");
   const decision = connectorDecision(connector, runtime, forced);
+  const projectName = projectNameFor(workspace);
   const result = {
     workspaceId: workspace.id,
     workspaceName: workspace.name,
     connectorName: runtime.connectorName,
     mcpUrl: runtime.mcpUrl,
-    connector: decision
+    connector: decision,
+    projectName,
+    project: projectDecision(project, workspace.id, projectName)
   };
   if (!decision.reusable) Object.assign(result, await adminPost(runtime, "/admin/pairing"));
   output(result);
@@ -111,10 +125,22 @@ async function main() {
     }));
     return;
   }
+  if (command === "mark-project-created") {
+    const workspace = new Workspace(workspaceRoot);
+    const projectUrl = argument("--project-url");
+    if (!projectUrl) throw new Error("--project-url is required");
+    output(markProjectCreated({
+      workspaceId: workspace.id,
+      projectName: projectNameFor(workspace),
+      projectUrl
+    }));
+    return;
+  }
   if (command === "status") {
     const workspace = new Workspace(workspaceRoot);
     const runtime = readRuntime(workspace.id);
     const connector = readConnector(workspace.id);
+    const project = readProject(workspace.id);
     output({
       workspaceId: workspace.id,
       live: await runtimeIsHealthy(runtime, workspace.id),
@@ -134,7 +160,8 @@ async function main() {
             startedAt: runtime.startedAt
           }
         : null,
-      connector
+      connector,
+      project
     });
     return;
   }
@@ -149,7 +176,9 @@ async function main() {
     output({ stopped: true });
     return;
   }
-  throw new Error("Usage: node src/cli.js <setup|serve|status|stop|mark-connector-installed> --workspace <path>");
+  throw new Error(
+    "Usage: node src/cli.js <setup|serve|status|stop|mark-connector-installed|mark-project-created> --workspace <path>"
+  );
 }
 
 main().catch((error) => {

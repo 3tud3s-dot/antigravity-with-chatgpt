@@ -88,6 +88,10 @@ test("OAuth requires PKCE and a short-lived one-time pairing code", async (t) =>
   });
   const page = await fetch(authorize);
   assert.equal(page.status, 200);
+  assert.match(
+    page.headers.get("content-security-policy"),
+    /form-action 'self' https:\/\/chatgpt\.com(?:;|\s)/
+  );
   const requestId = (await page.text()).match(/name="request_id" value="([^"]+)"/)?.[1];
   assert.ok(requestId);
   const pairing = bridge.pairing.create();

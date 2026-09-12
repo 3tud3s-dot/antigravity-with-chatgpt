@@ -10,8 +10,8 @@
 
 | 工具名称 | 核心入参示例 | 用途说明 |
 | :--- | :--- | :--- |
-| `new_page` | `{"url": "https://chatgpt.com/"}` | 创建专属的新 Tab，返回 `pageId` |
-| `list_pages` | `{}` | 列出所有页面，用于恢复会话或抓取跳转后的 `chatgpt.com/c/...` URL |
+| `new_page` | `{"url": "<saved project or conversation URL>"}` | 创建专属的新 Tab，返回 `pageId` |
+| `list_pages` | `{}` | 列出所有页面，用于恢复会话或获取跳转后的完整 Project conversation URL |
 | `select_page` | `{"pageId": 12345, "bringToFront": false}` | 聚焦并选中目标页面上下文 |
 | `take_snapshot`| `{"pageId": 12345}` | 获取当前页面的完整 a11y 树及元素动态 `uid` |
 | `type_text` | `{"pageId": 12345, "text": "...", "submitKey": "Enter"}` | 向当前焦点或指定输入区域键入文本并提交 |
@@ -50,6 +50,8 @@
 ---
 
 ## 3. 标准多轮交互流水线
+
+所有新 Advisor conversation 必须从已验证的 workspace ChatGPT Project 内创建。首次发消息前，快照中必须可见精确 Project 名称；不能仅凭 URL 猜测项目归属。
 
 每一轮对话严格执行以下步骤：
 
