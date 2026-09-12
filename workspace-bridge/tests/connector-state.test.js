@@ -8,17 +8,17 @@ const runtime = {
   mcpUrl: "https://current.example.invalid/mcp"
 };
 
-test("connector decision creates, reuses, or replaces without duplication", () => {
+test("connector decision creates, reuses, or recreates without duplication", () => {
   assert.deepEqual(connectorDecision(null, runtime), { reusable: false, action: "create" });
   assert.deepEqual(connectorDecision({ ...runtime }, runtime), { reusable: true, action: "reuse" });
   assert.deepEqual(
     connectorDecision({ ...runtime, mcpUrl: "https://old.example.invalid/mcp" }, runtime),
-    { reusable: false, action: "replace" }
+    { reusable: false, action: "recreate" }
   );
-  assert.deepEqual(connectorDecision({ ...runtime }, runtime, true), { reusable: false, action: "replace" });
+  assert.deepEqual(connectorDecision({ ...runtime }, runtime, true), { reusable: false, action: "recreate" });
   assert.deepEqual(
     connectorDecision({ ...runtime, workspaceId: "workspace-b" }, runtime),
-    { reusable: false, action: "replace" }
+    { reusable: false, action: "conflict" }
   );
 });
 

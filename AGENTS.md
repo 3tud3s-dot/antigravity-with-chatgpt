@@ -37,5 +37,6 @@
 - Maintain at most one active `Antigravity with ChatGPT · <workspace-name>` Connector for each canonical local workspace. A Connector is workspace-scoped, not conversation-scoped or feature-scoped.
 - On every activation, detect and reuse the existing matching workspace Connector. A new Antigravity conversation may create a new ChatGPT conversation inside the shared workspace Project, but it must not create another Connector.
 - Adding Skill features or starting another conversation is not a reason to create a replacement Connector.
-- If the existing Connector endpoint changes, prefer updating that Connector in place when ChatGPT supports it. If it cannot be updated or safely reused, stop and report the exact problem; do not create a duplicate or delete/recreate the Connector without the user's explicit approval.
+- In Quick Tunnel mode, a changed endpoint or required OAuth re-pair may recreate the exact current-workspace Connector because ChatGPT does not support editing its Server URL. If exactly one exact-name match exists, delete only that match and confirm it is gone; if none exists, skip deletion. Then create the same name with the current MCP URL. A new conversation alone is never a reason to recreate it.
+- Multiple exact-name matches are ambiguous: stop and report without modifying them. Never create a duplicate, and never delete/recreate an unrelated Connector.
 - Never modify, replace, or delete unrelated Connectors, especially any Connector whose name does not begin with `Antigravity with ChatGPT ·`.

@@ -96,6 +96,7 @@ export async function startBridge(options) {
     connectorName,
     pid: process.pid,
     port: actualPort,
+    tunnelMetricsPort: tunnel.metricsPort ?? null,
     adminToken,
     publicUrl,
     mcpUrl: `${publicUrl}/mcp`,

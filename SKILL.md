@@ -15,6 +15,8 @@ description: >-
 ```text
 User Prompt
      ↓
+Antigravity 接收需求 / 检查授权边界
+     ↓
 ChatGPT Web UI (via chrome-devtools MCP)
      ↓
 GPT Advisor Reply
@@ -28,6 +30,7 @@ Antigravity 综合思考 / 执行工具 / 回复用户
 1. 当前 Antigravity 会话与专属的 ChatGPT 网页会话建立 **1:1 独立绑定**。
 2. 用户的每一条 Prompt 在 Antigravity 响应前，必须先发送给对应的 ChatGPT 网页会话获取外部建议。
 3. **ChatGPT 是外部顾问，Antigravity 是主控者**：Antigravity 负责最终判断、调用本地工具或直接回复用户，不可机械照搬 GPT 回复。
+4. 用户只需在当前 Antigravity 会话首次启用时提及本技能。状态文件中 `enabled: true` 后，后续消息自动继续使用绑定的 Advisor conversation，无需再次提及 `antigravity-with-chatgpt`。
 
 ---
 
@@ -67,9 +70,11 @@ Antigravity 综合思考 / 执行工具 / 回复用户
 
 ### 步骤 2.0：启动并验证 Workspace Connector
 1. 读取并严格执行 [workspace-connector.md](./references/workspace-connector.md)。
-2. 使用当前 Antigravity workspace 的真实根目录启动或恢复 `workspace-bridge`，不得把 Skill 自身目录误当作用户 workspace。
-3. 根据 CLI 返回的 `connector.action` 创建、替换或复用 workspace 级 Connector。
-4. Connector 必须使用 OAuth，且只能暴露六个只读工具。Connector 未安装或身份未验证前，不得宣称 Advisor 模式已就绪。
+2. 使用当前 Antigravity workspace 的真实根目录先运行 `status --local-only`。只有 `live: true` 且 `tunnelReady: true` 才可复用；若本地 Bridge 存活但 Tunnel 未就绪，先停止该失效 Bridge，再将 `workspace-bridge serve` 作为持续运行任务重新启动。收到 `ready: true` 后继续而不是等待该任务退出；不得把 Skill 自身目录误当作用户 workspace。
+3. 仅通过 `setup --require-live` 获取 Connector 决策。创建或重建表单提交前必须用 `status --local-only` 同时确认 `live: true`、`tunnelReady: true` 且 `runtime.mcpUrl` 未变化；禁止追加 `curl`、`fetch` 或其他公网探测。
+4. 根据 CLI 返回的 `connector.action` 创建、受控重建或复用 workspace 级 Connector。`recreate` 若匹配一个当前 workspace 的精确同名 Connector，则删除该项并用新快照确认其已消失；若没有匹配项则跳过删除；随后使用当前 URL 创建相同名称并重新 OAuth。匹配多于一个时必须停止。`create` 同样只在确认没有精确同名 Connector 后可用；`reuse` 严禁打开插件管理；`conflict` 必须停止并报告。任何路径都不得产生重复 Connector 或操作其他 workspace 的 Connector。
+5. Connector 必须使用 OAuth，且只能暴露六个只读工具。Connector 未安装或身份未验证前，不得宣称 Advisor 模式已就绪。
+6. 任一步骤超时、持续任务退出或网页出现明确错误时，立即按参考协议熔断；不得以无界等待或反复诊断拖住会话。
 
 ### 步骤 2.1：创建或恢复 workspace ChatGPT Project
 1. 读取并严格执行 [chatgpt-project.md](./references/chatgpt-project.md)。
@@ -109,24 +114,36 @@ Antigravity 综合思考 / 执行工具 / 回复用户
 
 在技能启用后，**本会话后续收到的每一条用户任务/提示词**，必须严格遵循以下执行循环：
 
+```text
+只读或无改动：User → Antigravity → ChatGPT Advisor → Antigravity → User
+
+发生 workspace 改动：
+User → Antigravity → ChatGPT Advisor → Antigravity（实施）
+     → ChatGPT Advisor（验收最新改动）→ Antigravity → User
+```
+
+用户不需要说明何时咨询或验收 Advisor；这是技能启用后的默认行为。所有修改与命令仍受 Antigravity 自身授权规则约束，Advisor 意见不构成用户授权。
+
 ### 步骤 3.1：提取用户原始 Prompt
 获取用户本次对话输入的原始需求文本。
 
 ### 步骤 3.2：定位/恢复绑定的 ChatGPT 页面
 1. 读取本会话的 `chatgpt_session.json` 获取 `chatgptPageId` 与 `chatgptUrl`。
-2. 调用 `list_pages` 确认该 `chatgptPageId` 是否仍然存活：
+2. 按 [workspace-connector.md](./references/workspace-connector.md) 先执行一次本地状态检查。只有 `live: true` 且 `tunnelReady: true` 才能继续；否则先完成一次 Bridge 重启、同名 Connector URL 更新和 OAuth 重连。不得带着失效通路向 Advisor 发送用户 Prompt。
+3. 调用 `list_pages` 确认该 `chatgptPageId` 是否仍然存活：
    - **存活**：调用 `select_page(pageId=chatgptPageId, bringToFront=false)`。
    - **已关闭/失效**：调用 `new_page(url=chatgptUrl)` 重新打开该会话，更新本地 `chatgptPageId`。
 
 ### 步骤 3.3：发送本轮 Prompt 到 ChatGPT Web
 1. 每次操作前重新调用 `take_snapshot(pageId)` 获取实时 DOM 状态。
 2. 找到输入框，将用户原始 Prompt 原样发送给 ChatGPT（第一版保持原样发送，不加冗长包装）。
-3. 使用 `type_text(..., submitKey="Enter")` 或点击发送按钮提交。
+3. 严格按 [browser-protocol.md](./references/browser-protocol.md) 的 Prompt 幂等提交规则：用一次 `fill` 写入完整文本，获取新快照后只点击一次发送按钮。禁止使用 `type_text(..., submitKey="Enter")`，禁止拆段提交或在结果不明时重发。
 
 ### 步骤 3.4：等待生成完成并提取回复
 1. 等待 ChatGPT 流式回复结束（停止流式按钮消失，界面重新回到可发送状态）。
 2. 调用 `take_snapshot(pageId)`，定位最新的 Assistant 回复区域。
 3. 提取完整的 GPT 回复文本。
+4. 若回复明确包含 Connector 账户连接失败或工具鉴权失败，按 [workspace-connector.md](./references/workspace-connector.md) 只执行一次恢复流程；恢复成功后只重试一次当前逻辑 Prompt，再次失败则熔断并报告。
 
 ### 步骤 3.5：Antigravity 综合研判与决策执行
 1. 将 GPT 回复作为外部顾问意见：
@@ -140,7 +157,24 @@ Antigravity 综合思考 / 执行工具 / 回复用户
    - 当前工作区（Workspace）实际代码、文件现状；
    - Antigravity 自身的工具集与规则（如安全边界规则）。
 3. 展开实际行动：执行代码修改、命令测试或向用户输出最终回答。
-4. **禁止机械转发**：在最终给用户的输出中，给出 Antigravity 结合自身判断后的完整方案，必要时可注明已参考 ChatGPT 顾问的建议。
+4. 若用户对先前方案作出明确批准，只能在已经向用户说明的范围内实施；不得把批准扩展到新的文件、操作或目标。
+5. 若本轮没有造成 workspace 文件改动，直接进入最终回复。
+6. **禁止机械转发**：在最终给用户的输出中，给出 Antigravity 结合自身判断后的完整方案，必要时可注明已参考 ChatGPT 顾问的建议。
+
+### 步骤 3.6：改动后的自动 Advisor 验收
+若 Antigravity 在本轮创建、修改或删除了任何 workspace 文件，在向用户回复前必须自动执行一次额外验收；用户无需主动要求：
+
+1. 回到同一个绑定的 ChatGPT Advisor conversation，并按步骤 3.2 重新确认或恢复页面。
+2. 获取新快照，并按同一 Prompt 幂等提交规则发送一则简短验收请求，要求 Advisor：
+   - 使用当前 workspace 的指定 Connector 读取最新 `git_status`、`git_diff` 及必要文件；
+   - 对照本轮用户已经批准的目标检查实现；
+   - 区分阻塞问题与非阻塞建议，并给出简短结论。
+3. 若本轮运行过测试，将测试命令及结果摘要一并告诉 Advisor；不得声称 Connector 能读取终端历史。
+4. 等待并提取该验收回复。Antigravity 必须自行判断和汇总；若发现阻塞问题，不得宣称完成，应按现有授权边界修复或报告用户。
+5. Advisor 验收是只读审查，不得触发 ChatGPT 写文件，也不替代用户授权或最终确认。
+
+### 步骤 3.7：用户最终确认的自动收尾
+当用户明确表示接受、通过或结束当前结果时，按同一 Prompt 幂等提交规则将该确认发送到同一个 Advisor conversation，请其简短确认闭环状态，再由 Antigravity 向用户收尾。除非用户同时提出新需求，否则不得因此继续修改 workspace。用户无需再次提及本技能或 ChatGPT Advisor。
 
 ---
 

@@ -60,10 +60,16 @@ test("an access token issued for one workspace is rejected by another bridge", a
   assert.equal(response.status, 401);
 });
 
-test("OAuth requires PKCE and a short-lived one-time pairing code", async (t) => {
+test("OAuth requires PKCE, supports refresh, and uses a short-lived one-time pairing code", async (t) => {
   const root = temporaryDirectory("ag-oauth");
   t.after(() => cleanup(root));
-  const bridge = await startBridge({ workspaceRoot: root, port: 0, tunnel: fakeTunnel, persistRuntime: false });
+  const bridge = await startBridge({
+    workspaceRoot: root,
+    port: 0,
+    tunnel: fakeTunnel,
+    persistRuntime: false,
+    authOptions: { accessTtlMs: 5 }
+  });
   t.after(() => bridge.close());
   const local = `http://127.0.0.1:${bridge.runtime.port}`;
   const redirectUri = "https://chatgpt.com/aip/callback";
@@ -120,6 +126,23 @@ test("OAuth requires PKCE and a short-lived one-time pairing code", async (t) =>
   assert.match(tokens.access_token, /^ag_access_/);
   assert.match(tokens.refresh_token, /^ag_refresh_/);
   assert.equal(bridge.pairing.verify(pairing.code).reason, "no_active_session");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(bridge.authStore.verifyAccessToken(tokens.access_token), { ok: false, reason: "expired" });
+  const refreshResponse = await fetch(`${local}/oauth/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: tokens.refresh_token,
+      client_id: clientId
+    })
+  });
+  assert.equal(refreshResponse.status, 200);
+  const refreshed = await refreshResponse.json();
+  assert.match(refreshed.access_token, /^ag_access_/);
+  assert.notEqual(refreshed.access_token, tokens.access_token);
+  assert.match(refreshed.refresh_token, /^ag_refresh_/);
+  assert.notEqual(refreshed.refresh_token, tokens.refresh_token);
 });
 
 test("public MCP endpoint rejects unauthenticated requests", async (t) => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseQuickTunnelUrl } from "../src/tunnel/quick.js";
-import { tunnelIsReadyForSetup, waitForTunnel } from "../src/tunnel/health.js";
+import { localTunnelIsReady, tunnelIsReadyForSetup, waitForTunnel } from "../src/tunnel/health.js";
 
 test("extracts only a Cloudflare Quick Tunnel HTTPS URL", () => {
   assert.equal(
@@ -65,25 +65,42 @@ test("stops retrying when the Quick Tunnel readiness deadline expires", async ()
   assert.equal(attempts, 3);
 });
 
-test("skips the unreliable public-loopback probe during Windows setup", async () => {
-  let attempted = false;
+test("uses cloudflared loopback readiness during Windows setup", async () => {
+  let requestedUrl = null;
   const ready = await tunnelIsReadyForSetup(
-    { publicUrl: "https://quiet-river.trycloudflare.com" },
+    { publicUrl: "https://quiet-river.trycloudflare.com", tunnelMetricsPort: 23456 },
     "workspace-1",
     {
       platform: "win32",
-      fetchImpl: async () => {
-        attempted = true;
-        throw new Error("public loopback is blocked");
+      fetchImpl: async (url) => {
+        requestedUrl = url;
+        return { ok: true };
       }
     }
   );
 
   assert.equal(ready, true);
-  assert.equal(attempted, false);
+  assert.equal(requestedUrl, "http://127.0.0.1:23456/ready");
 });
 
-test("keeps the bounded public health check on other platforms", async () => {
+test("rejects a running cloudflared process whose local readiness endpoint is down", async () => {
+  let clock = 0;
+  const runtime = { publicUrl: "https://quiet-river.trycloudflare.com", tunnelMetricsPort: 23456 };
+  assert.equal(await localTunnelIsReady(runtime, { fetchImpl: async () => ({ ok: false }) }), false);
+  const ready = await tunnelIsReadyForSetup(runtime, "workspace-1", {
+    platform: "win32",
+    timeoutMs: 1_000,
+    intervalMs: 250,
+    now: () => clock,
+    sleep: async (milliseconds) => {
+      clock += milliseconds;
+    },
+    fetchImpl: async () => ({ ok: false })
+  });
+  assert.equal(ready, false);
+});
+
+test("falls back to the bounded public health check for an old runtime without metrics", async () => {
   const ready = await tunnelIsReadyForSetup(
     { publicUrl: "https://quiet-river.trycloudflare.com" },
     "workspace-1",

@@ -18,13 +18,29 @@ Let `<skill-root>` be the directory containing `SKILL.md`, and let `<workspace-r
 
 1. Require Node.js 20 or later and `cloudflared`. If either is unavailable, stop and report the missing prerequisite; do not silently expose an unauthenticated server.
 2. If `<skill-root>/workspace-bridge/node_modules` is missing, run `npm ci --omit=dev` in `<skill-root>/workspace-bridge`. This installs only the bridge's implementation dependencies; it does not add an install tool to ChatGPT.
-3. Run:
+3. Run a bounded local-only status check first:
 
    ```text
-   node <skill-root>/workspace-bridge/src/cli.js setup --workspace <workspace-root>
+   node <skill-root>/workspace-bridge/src/cli.js status --local-only --workspace <workspace-root>
    ```
 
-4. Parse the JSON response. It contains:
+   Continue to step 5 only when both `live` and `tunnelReady` are `true`. `live` means the local Node service exists; `tunnelReady` means cloudflared currently has an active Cloudflare connection. If `live` is true but `tunnelReady` is false, run `stop` once for this workspace and continue to step 4. If `live` is false, continue to step 4.
+
+4. Start `serve` as a managed long-running command task:
+
+   ```text
+   node <skill-root>/workspace-bridge/src/cli.js serve --workspace <workspace-root>
+   ```
+
+   The command intentionally remains active for the lifetime of the Advisor session. Do not wait for it to exit. Wait at most 45 seconds for one JSON object with `"ready": true`; after that output appears, keep the task running and continue. If the task exits or no ready object appears within the bound, stop and report the Bridge startup failure.
+
+5. Reuse the healthy Bridge from step 3, or keep the exact `serve` task from step 4 active, then run:
+
+   ```text
+   node <skill-root>/workspace-bridge/src/cli.js setup --require-live --workspace <workspace-root>
+   ```
+
+6. Parse the setup JSON response. It contains:
 
    ```json
    {
@@ -46,17 +62,18 @@ Let `<skill-root>` be the directory containing `SKILL.md`, and let `<workspace-r
    }
    ```
 
-The CLI canonicalizes the workspace root, reuses a healthy bridge for the same workspace, or starts a detached loopback-only bridge and Quick Tunnel. Runtime and Connector state live in the OS user state directory, outside the workspace and outside Git.
+The CLI canonicalizes the workspace root. The managed `serve` task owns the loopback-only Bridge and Quick Tunnel. cloudflared exposes a separately allocated loopback-only metrics endpoint; the CLI uses its `/ready` response to distinguish a live Node process from a live Cloudflare route without making a public-loopback request. `setup --require-live` fails instead of silently launching another detached process. Runtime and Connector state live in the OS user state directory, outside the workspace and outside Git.
 
 ### Decision
 
 - `connector.action == "reuse"`: do not open the plugin manager and do not create another Connector. Continue with a new Advisor conversation and verify `workspace_info` there.
 - `connector.action == "create"`: create the exact returned Connector.
-- `connector.action == "replace"`: the Quick Tunnel endpoint changed. Delete only the exact returned Connector if it exists, then recreate that same name. Never use Reconnect on the old endpoint.
+- `connector.action == "recreate"`: the Quick Tunnel endpoint changed or the exact Connector needs fresh OAuth. Delete and recreate only the exact current-workspace Connector with the same name and current `mcpUrl`; complete OAuth again. Never create a second simultaneous Connector.
+- `connector.action == "conflict"`: local state does not identify the expected workspace Connector. Stop and report; do not modify any Connector.
 
-If a supposedly reusable Connector fails the workspace verification, run setup once with `--force-connector`, then follow the returned `replace` flow. Do not loop indefinitely.
+If a supposedly reusable Connector reports an account connection or authorization failure while `tunnelReady` is true, run `setup --require-live --reauthorize` once to get a fresh pairing code, follow the controlled `recreate` flow for that exact Connector, and retry verification once. Any second failure must stop the flow.
 
-## 3. Create or replace the ChatGPT Connector
+## 3. Create or recreate the ChatGPT Connector
 
 Use only `call_mcp_tool` with `ServerName="chrome-devtools"`. Take a fresh snapshot before every UID-based action and never reuse a UID after navigation, submission, modal changes, or SPA rendering.
 
@@ -67,18 +84,42 @@ Use only `call_mcp_tool` with `ServerName="chrome-devtools"`. Take a fresh snaps
 4. Inspect only the Connector cards needed to find the exact `connectorName`.
    - Ignore every Connector without the `Antigravity with ChatGPT ·` prefix.
    - Ignore prefixed Connectors with a different exact name.
-5. For `replace`, delete only the exact matching Connector. For `create`, if an exact match unexpectedly already exists, delete that exact match before creation so a duplicate is never created.
-6. Navigate the same dedicated page to:
-   `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`
-7. Fill the form:
-   - Name: exact `connectorName`
-   - Description: `Read-only access to the current Antigravity workspace for ChatGPT Advisor analysis.`
-   - Server URL: exact `mcpUrl`
-   - Authentication: `OAuth`
-8. Submit Connect/Authorize. On the bridge authorization page, enter the current one-time `code` and submit.
-9. Treat Connected/authorized/pairing accepted as success. Do not wait for a fixed tool count on the settings page.
+   - Count exact-name matches. More than one exact match is ambiguous: stop and report without editing or deleting any of them. Zero or one match may continue through the controlled create/recreate rules below.
+5. Branch strictly on `connector.action`. The branches are mutually exclusive.
 
-If the code expires before submission, rerun setup with `--force-connector` to obtain a fresh code. Never print tokens or extract OAuth state from the page.
+   ### `recreate` branch
+
+   - If exactly one matching card exists, reconfirm its full exact `connectorName` in a fresh snapshot immediately before deleting only that Connector. After the modal closes, take a fresh snapshot and confirm that no card with the exact name remains. If deletion is ambiguous, fails, or the exact card remains, stop without creating anything.
+   - If no matching card exists, skip deletion and continue. This covers a previously incomplete cleanup without creating a duplicate.
+   - Only after confirmed deletion, navigate the dedicated page to:
+     `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`
+   - Create the same exact `connectorName` with the current `mcpUrl`; do not alter any other Connector.
+
+   ### `create` branch
+
+   - Use this branch only when `connector.action == "create"` and no exact matching Connector card exists.
+   - If exactly one match unexpectedly exists, delete only that exact Connector and confirm its card disappears before continuing. More than one match must stop.
+   - Navigate the dedicated page to:
+     `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`
+   - Fill the new Connector form:
+     - Name: exact `connectorName`
+     - Description: `Read-only access to the current Antigravity workspace for ChatGPT Advisor analysis.`
+     - Server URL: exact `mcpUrl`
+     - Authentication: `OAuth`
+
+6. Immediately before submitting the new-Connector form, run this bounded local-only check:
+
+   ```text
+   node <skill-root>/workspace-bridge/src/cli.js status --local-only --workspace <workspace-root>
+   ```
+
+   Continue only when `live` and `tunnelReady` are both `true` and the returned `runtime.mcpUrl` equals the setup result. Never use `curl`, Node `fetch`, PowerShell web commands, or repeated public discovery probes; the loopback cloudflared readiness endpoint and the ChatGPT Connector flow are the authorities.
+7. Submit Connect/Authorize. On the bridge authorization page, enter the current one-time `code` and submit.
+8. Treat Connected/authorized/pairing accepted as success. Do not wait for a fixed tool count on the settings page.
+
+If the code expires before submission, rerun setup with `--require-live --reauthorize` to obtain a fresh code for the same Connector. Never print tokens or extract OAuth state from the page.
+
+If ChatGPT displays an explicit Connector or OAuth error, stop that attempt immediately. Take one fresh snapshot and run one `status --local-only` check, then report the exact webpage error and `live` result. Do not keep clicking, refill the form, start network diagnostics, or loop through retries.
 
 ## 4. Create and verify the Advisor conversation
 
@@ -100,14 +141,21 @@ Whether the Connector was created or reused, first follow [chatgpt-project.md](.
 
 5. Persist the new ChatGPT conversation URL in the existing per-conversation `chatgpt_session.json` along with `workspaceId` and `connectorName`.
 
-If verification fails, do not mark the Connector installed and do not overwrite a previously valid conversation binding. Report the exact failure after one repair attempt.
+If verification fails with an account connection or authorization error, perform exactly one repair attempt:
+
+1. Run `status --local-only` once.
+2. If `tunnelReady` is false, stop the stale Bridge, start a new managed `serve`, run `setup --require-live`, and follow its `recreate` action for the same Connector name.
+3. If `tunnelReady` is true, run `setup --require-live --reauthorize` and follow its controlled `recreate` action with the fresh pairing code.
+4. Return to the same Advisor conversation and retry the verification Prompt once.
+
+Do not mark the Connector installed or overwrite a previously valid conversation binding until verification succeeds. A second failure ends the attempt and must be reported.
 
 ## 5. Reuse behavior
 
 On every later enable in the same workspace, run `setup` again:
 
-- A live bridge plus a locally confirmed Connector at the same MCP URL returns `reuse`.
-- A dead bridge starts a new Quick Tunnel; its URL differs, so setup returns `replace` rather than creating a second Connector.
+- A locally live Bridge whose cloudflared `/ready` endpoint is healthy plus a confirmed Connector at the same MCP URL returns `reuse`.
+- A stale or dead Tunnel is stopped and restarted. Its new URL returns `recreate`, so Antigravity deletes only the old exact-name Connector and creates the same name with the new URL. It never leaves two simultaneous Connectors for the workspace.
 - A new Antigravity conversation always creates a new ChatGPT conversation inside the saved workspace Project, even when the Project and Connector are reused.
 - The first `workspace_info` verification in every new ChatGPT conversation guards against workspace or Connector cross-wiring.
 

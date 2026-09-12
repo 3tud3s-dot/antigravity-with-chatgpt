@@ -106,13 +106,10 @@ export function projectDecision(project, workspaceId, projectName) {
 }
 
 export function connectorDecision(connector, runtime, forced = false) {
-  const reusable =
-    !forced &&
-    connector?.workspaceId === runtime.workspaceId &&
-    connector?.mcpUrl === runtime.mcpUrl &&
-    connector?.connectorName === runtime.connectorName;
-  return {
-    reusable,
-    action: reusable ? "reuse" : connector ? "replace" : "create"
-  };
+  if (!connector) return { reusable: false, action: "create" };
+  const sameConnector =
+    connector.workspaceId === runtime.workspaceId && connector.connectorName === runtime.connectorName;
+  if (!sameConnector) return { reusable: false, action: "conflict" };
+  if (!forced && connector.mcpUrl === runtime.mcpUrl) return { reusable: true, action: "reuse" };
+  return { reusable: false, action: "recreate" };
 }
